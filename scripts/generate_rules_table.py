@@ -117,20 +117,20 @@ def extract_codes_from_line(line):
 
 
 def extract_all_sc_codes(content):
-    """Extract all SC codes and their messages from the file."""
+    """Extract all SC codes and their messages from Analytics.hs."""
     all_codes = {}
 
-    # Pattern 1: (err|warn|info|style|styleWithFix) id CODE "message" (on same line)
-    pattern1 = r'(?:err|warn|info|style(?:WithFix)?)\s+(?:\([^)]+\)|[\w\']+)\s+(\d{4})\s+"([^"]+)'
+    # Pattern 1: (err|warn|info|style)[WithFix|type] id CODE "message" (on same line)
+    pattern1 = r'(?:err|warn|info|style)(?:WithFix|type)?\s+(?:\([^)]+\)|[\w\']+)\s+(\d{4})\s+"([^"]+)'
     for match in re.finditer(pattern1, content):
         code = f"SC{match.group(1)}"
         message = match.group(2)
         if code not in all_codes:
             all_codes[code] = message
 
-    # Pattern 2: (err|warn|info|style|styleWithFix) id CODE $ (message on next line(s))
+    # Pattern 2: (err|warn|info|style)[WithFix|type] id CODE $ (message on next line(s))
     # This handles cases like: info id 2153 $\n"message"
-    pattern2 = r'(?:err|warn|info|style(?:WithFix)?)\s+(?:\([^)]+\)|[\w\']+)\s+(\d{4})\s+(?:\$|[\(\{])\s*\n\s*"([^"]+)'
+    pattern2 = r'(?:err|warn|info|style)(?:WithFix|type)?\s+(?:\([^)]+\)|[\w\']+)\s+(\d{4})\s+(?:\$|[\(\{])\s*\n\s*"([^"]+)'
     for match in re.finditer(pattern2, content):
         code = f"SC{match.group(1)}"
         message = match.group(2)
@@ -138,7 +138,7 @@ def extract_all_sc_codes(content):
             all_codes[code] = message
 
     # Pattern 3: For style messages with $: style id CODE $ "message"
-    pattern3 = r'(?:err|warn|info|style(?:WithFix)?)\s+(?:\([^)]+\)|[\w\']+)\s+(\d{4})\s+\$\s+"([^"]+)'
+    pattern3 = r'(?:err|warn|info|style)(?:WithFix|type)?\s+(?:\([^)]+\)|[\w\']+)\s+(\d{4})\s+\$\s+"([^"]+)'
     for match in re.finditer(pattern3, content):
         code = f"SC{match.group(1)}"
         message = match.group(2)
@@ -146,7 +146,7 @@ def extract_all_sc_codes(content):
             all_codes[code] = message
 
     # Pattern 4: For messages starting with paren: info id CODE ("message"
-    pattern4 = r'(?:err|warn|info|style(?:WithFix)?)\s+(?:\([^)]+\)|[\w\']+)\s+(\d{4})\s+\("([^"]+)'
+    pattern4 = r'(?:err|warn|info|style)(?:WithFix|type)?\s+(?:\([^)]+\)|[\w\']+)\s+(\d{4})\s+\("([^"]+)'
     for match in re.finditer(pattern4, content):
         code = f"SC{match.group(1)}"
         message = match.group(2)
@@ -155,10 +155,161 @@ def extract_all_sc_codes(content):
 
     # Pattern 5: For messages with $ followed by string concat: warn id CODE $\nvar ++ "message"
     # This is complex, so let's just get the partial message
-    pattern5 = r'(?:err|warn|info|style(?:WithFix)?)\s+(?:\([^)]+\)|[\w\']+)\s+(\d{4})\s+\$\s*\n\s*\w+\s*\+\+\s*"([^"]+)'
+    pattern5 = r'(?:err|warn|info|style)(?:WithFix|type)?\s+(?:\([^)]+\)|[\w\']+)\s+(\d{4})\s+\$\s*\n\s*\w+\s*\+\+\s*"([^"]+)'
     for match in re.finditer(pattern5, content):
         code = f"SC{match.group(1)}"
         message = match.group(2)  # This will be partial but better than nothing
+        if code not in all_codes:
+            all_codes[code] = message
+
+    # Pattern 6: makeComment[WithFix] (ErrorC|WarningC|InfoC|StyleC) id CODE "message"
+    pattern6 = r'makeComment(?:WithFix)?\s+(?:ErrorC|WarningC|InfoC|StyleC)\s+(?:\([^)]+\)|[\w\']+)\s+(\d{4})\s+"([^"]+)'
+    for match in re.finditer(pattern6, content):
+        code = f"SC{match.group(1)}"
+        message = match.group(2)
+        if code not in all_codes:
+            all_codes[code] = message
+
+    # Pattern 7: makeComment[WithFix] (ErrorC|WarningC|InfoC|StyleC) id CODE $\n"message"
+    pattern7 = r'makeComment(?:WithFix)?\s+(?:ErrorC|WarningC|InfoC|StyleC)\s+(?:\([^)]+\)|[\w\']+)\s+(\d{4})\s+\$\s*\n\s*"([^"]+)'
+    for match in re.finditer(pattern7, content):
+        code = f"SC{match.group(1)}"
+        message = match.group(2)
+        if code not in all_codes:
+            all_codes[code] = message
+
+    # Pattern 8: Single-line variable concatenation: info id CODE $ var ++ "message"
+    pattern8 = r'(?:err|warn|info|style)(?:WithFix|type)?\s+(?:\([^)]+\)|[\w\']+)\s+(\d{4})\s+\$\s*\w+\s*\+\+\s*"([^"]+)'
+    for match in re.finditer(pattern8, content):
+        code = f"SC{match.group(1)}"
+        message = match.group(2)
+        if code not in all_codes:
+            all_codes[code] = message
+
+    # Pattern 9: Complex expressions after $: CODE $ ... "message" (catches if/then/else, etc.)
+    # This is a catch-all for patterns like: warn id CODE $\n    if ...\n    then "message"\n    else "other"
+    pattern9 = r'(?:err|warn|info|style)(?:WithFix|type)?\s+(?:\([^)]+\)|[\w\']+)\s+(\d{4})\s+\$[^"]*?"([^"]+)"'
+    for match in re.finditer(pattern9, content, re.DOTALL):
+        code = f"SC{match.group(1)}"
+        message = match.group(2)
+        if code not in all_codes:
+            all_codes[code] = message
+
+    return all_codes
+
+
+def extract_shellsupport_sc_codes(content):
+    """Extract all SC codes and their messages from ShellSupport.hs."""
+    all_codes = {}
+
+    # Pattern 1: warnMsg id CODE "message" or warnMsg id CODE $ "message"
+    pattern1 = r'warnMsg\s+(?:\([^)]+\)|[\w\']+)\s+(\d{4})\s+"([^"]+)'
+    for match in re.finditer(pattern1, content):
+        code = f"SC{match.group(1)}"
+        message = match.group(2)
+        if code not in all_codes:
+            all_codes[code] = message
+
+    # Pattern 2: warnMsg id CODE $\n"message"
+    pattern2 = r'warnMsg\s+(?:\([^)]+\)|[\w\']+)\s+(\d{4})\s+\$\s*\n\s*"([^"]+)'
+    for match in re.finditer(pattern2, content):
+        code = f"SC{match.group(1)}"
+        message = match.group(2)
+        if code not in all_codes:
+            all_codes[code] = message
+
+    # Pattern 3: warnMsg id CODE $ var ++ "message" (single line concat)
+    pattern3 = r'warnMsg\s+(?:\([^)]+\)|[\w\']+)\s+(\d{4})\s+\$\s*\w+\s*\+\+\s*"([^"]+)'
+    for match in re.finditer(pattern3, content):
+        code = f"SC{match.group(1)}"
+        message = match.group(2)
+        if code not in all_codes:
+            all_codes[code] = message
+
+    # Pattern 4: Tuple patterns like (CODE, [...], \x -> "message")
+    pattern4 = r'\((\d{4}),.*?->.*?"([^"]+)"'
+    for match in re.finditer(pattern4, content, re.DOTALL):
+        code = f"SC{match.group(1)}"
+        message = match.group(2)
+        if code not in all_codes:
+            all_codes[code] = message
+
+    # Pattern 5: Catch-all for warnMsg CODE $ ... "message"
+    pattern5 = r'warnMsg\s+(?:\([^)]+\)|[\w\']+)\s+(\d{4})\s+\$[^"]*?"([^"]+)"'
+    for match in re.finditer(pattern5, content, re.DOTALL):
+        code = f"SC{match.group(1)}"
+        message = match.group(2)
+        if code not in all_codes:
+            all_codes[code] = message
+
+    return all_codes
+
+
+def extract_parser_sc_codes(content):
+    """Extract all SC codes and their messages from Parser.hs."""
+    all_codes = {}
+
+    # Pattern 1: parseNote[At|AtId|AtWithEnd] [pos] (ErrorC|WarningC|InfoC) CODE "message" (on same line)
+    pattern1 = r'parseNote(?:At(?:Id|WithEnd)?)?\s+(?:\w+\s+)?(?:ErrorC|WarningC|InfoC|StyleC)\s+(\d{4})\s+"([^"]+)'
+    for match in re.finditer(pattern1, content):
+        code = f"SC{match.group(1)}"
+        message = match.group(2)
+        if code not in all_codes:
+            all_codes[code] = message
+
+    # Pattern 2: parseNote[At|AtId|AtWithEnd] [pos] (ErrorC|WarningC|InfoC) CODE $\n"message"
+    pattern2 = r'parseNote(?:At(?:Id|WithEnd)?)?\s+(?:\w+\s+)?(?:ErrorC|WarningC|InfoC|StyleC)\s+(\d{4})\s+\$\s*\n\s*"([^"]+)'
+    for match in re.finditer(pattern2, content):
+        code = f"SC{match.group(1)}"
+        message = match.group(2)
+        if code not in all_codes:
+            all_codes[code] = message
+
+    # Pattern 3: parseNote[At|AtId|AtWithEnd] [pos] (ErrorC|WarningC|InfoC) CODE $ "message"
+    pattern3 = r'parseNote(?:At(?:Id|WithEnd)?)?\s+(?:\w+\s+)?(?:ErrorC|WarningC|InfoC|StyleC)\s+(\d{4})\s+\$\s+"([^"]+)'
+    for match in re.finditer(pattern3, content):
+        code = f"SC{match.group(1)}"
+        message = match.group(2)
+        if code not in all_codes:
+            all_codes[code] = message
+
+    # Pattern 4: parseProblem[At|AtId|AtWithEnd] [pos] (ErrorC|WarningC|InfoC) CODE "message" (on same line)
+    pattern4 = r'parseProblem(?:At(?:Id|WithEnd)?)?\s+(?:\w+\s+)?(?:ErrorC|WarningC|InfoC|StyleC)\s+(\d{4})\s+"([^"]+)'
+    for match in re.finditer(pattern4, content):
+        code = f"SC{match.group(1)}"
+        message = match.group(2)
+        if code not in all_codes:
+            all_codes[code] = message
+
+    # Pattern 5: parseProblem[At|AtId|AtWithEnd] [pos] (ErrorC|WarningC|InfoC) CODE $\n"message"
+    pattern5 = r'parseProblem(?:At(?:Id|WithEnd)?)?\s+(?:\w+\s+)?(?:ErrorC|WarningC|InfoC|StyleC)\s+(\d{4})\s+\$\s*\n\s*"([^"]+)'
+    for match in re.finditer(pattern5, content):
+        code = f"SC{match.group(1)}"
+        message = match.group(2)
+        if code not in all_codes:
+            all_codes[code] = message
+
+    # Pattern 6: parseProblem[At|AtId|AtWithEnd] [pos] (ErrorC|WarningC|InfoC) CODE $ "message"
+    pattern6 = r'parseProblem(?:At(?:Id|WithEnd)?)?\s+(?:\w+\s+)?(?:ErrorC|WarningC|InfoC|StyleC)\s+(\d{4})\s+\$\s+"([^"]+)'
+    for match in re.finditer(pattern6, content):
+        code = f"SC{match.group(1)}"
+        message = match.group(2)
+        if code not in all_codes:
+            all_codes[code] = message
+
+    # Pattern 7: ParseNote constructor (capital P): ParseNote pos pos (ErrorC|WarningC|InfoC) CODE $
+    pattern7 = r'ParseNote\s+\w+\s+\w+\s+(?:ErrorC|WarningC|InfoC|StyleC)\s+(\d{4})\s+\$\s*\n\s*"([^"]+)'
+    for match in re.finditer(pattern7, content):
+        code = f"SC{match.group(1)}"
+        message = match.group(2)
+        if code not in all_codes:
+            all_codes[code] = message
+
+    # Pattern 8: Catch-all for parseProblem/parseNote CODE $ ... "message"
+    pattern8 = r'(?:parseProblem|parseNote)(?:At(?:Id|WithEnd)?)?\s+(?:\w+\s+)?(?:ErrorC|WarningC|InfoC|StyleC)\s+(\d{4})\s+\$[^"]*?"([^"]+)"'
+    for match in re.finditer(pattern8, content, re.DOTALL):
+        code = f"SC{match.group(1)}"
+        message = match.group(2)
         if code not in all_codes:
             all_codes[code] = message
 
@@ -166,29 +317,63 @@ def extract_all_sc_codes(content):
 
 
 def main():
-    # Read the Analytics.hs file
+    # Read all the Haskell source files with SC codes
     project_root = Path(__file__).parent.parent
     analytics_path = project_root / 'src' / 'ShellCheck' / 'Analytics.hs'
+    parser_path = project_root / 'src' / 'ShellCheck' / 'Parser.hs'
+    shellsupport_path = project_root / 'src' / 'ShellCheck' / 'Checks' / 'ShellSupport.hs'
+    commands_path = project_root / 'src' / 'ShellCheck' / 'Checks' / 'Commands.hs'
+    controlflow_path = project_root / 'src' / 'ShellCheck' / 'Checks' / 'ControlFlow.hs'
 
-    if not analytics_path.exists():
-        print(f"Error: {analytics_path} not found", file=sys.stderr)
-        sys.exit(1)
+    files_to_read = {
+        'Analytics.hs': analytics_path,
+        'Parser.hs': parser_path,
+        'ShellSupport.hs': shellsupport_path,
+        'Commands.hs': commands_path,
+        'ControlFlow.hs': controlflow_path
+    }
 
-    content = analytics_path.read_text(encoding='utf-8')
+    for name, path in files_to_read.items():
+        if not path.exists():
+            print(f"Error: {path} not found", file=sys.stderr)
+            sys.exit(1)
+
+    analytics_content = analytics_path.read_text(encoding='utf-8')
+    parser_content = parser_path.read_text(encoding='utf-8')
+    shellsupport_content = shellsupport_path.read_text(encoding='utf-8')
+    commands_content = commands_path.read_text(encoding='utf-8')
+    controlflow_content = controlflow_path.read_text(encoding='utf-8')
 
     # Extract optional checks with their long names
-    optional_checks = extract_optional_checks(content)
+    optional_checks = extract_optional_checks(analytics_content)
 
     print(f"Found {len(optional_checks)} optional checks", file=sys.stderr)
 
     # For each optional check, find its SC codes
     for check in optional_checks:
-        check['codes'] = extract_sc_codes_from_function(content, check['function'])
+        check['codes'] = extract_sc_codes_from_function(analytics_content, check['function'])
         print(f"  {check['long_name']}: {check['function']} -> {check['codes']}", file=sys.stderr)
 
-    # Extract all SC codes with their messages
-    all_codes = extract_all_sc_codes(content)
-    print(f"\nFound {len(all_codes)} total SC codes", file=sys.stderr)
+    # Extract all SC codes with their messages from all files
+    all_codes = extract_all_sc_codes(analytics_content)
+    parser_codes = extract_parser_sc_codes(parser_content)
+    shellsupport_codes = extract_shellsupport_sc_codes(shellsupport_content)
+    commands_codes = extract_all_sc_codes(commands_content)  # Uses same pattern as Analytics
+    controlflow_codes = extract_all_sc_codes(controlflow_content)  # Uses same pattern as Analytics
+
+    print(f"\nFound {len(all_codes)} SC codes in Analytics.hs", file=sys.stderr)
+    print(f"Found {len(parser_codes)} SC codes in Parser.hs", file=sys.stderr)
+    print(f"Found {len(shellsupport_codes)} SC codes in ShellSupport.hs", file=sys.stderr)
+    print(f"Found {len(commands_codes)} SC codes in Commands.hs", file=sys.stderr)
+    print(f"Found {len(controlflow_codes)} SC codes in ControlFlow.hs", file=sys.stderr)
+
+    # Merge the codes (first file takes precedence if there are duplicates)
+    all_codes.update({k: v for k, v in parser_codes.items() if k not in all_codes})
+    all_codes.update({k: v for k, v in shellsupport_codes.items() if k not in all_codes})
+    all_codes.update({k: v for k, v in commands_codes.items() if k not in all_codes})
+    all_codes.update({k: v for k, v in controlflow_codes.items() if k not in all_codes})
+
+    print(f"Total unique SC codes: {len(all_codes)}", file=sys.stderr)
 
     # Create mapping from SC code to long name
     code_to_check = {}
@@ -199,8 +384,10 @@ def main():
     # Generate Markdown table
     output = []
     output.append("# ShellCheck Rules Reference\n")
-    relative_path = analytics_path.relative_to(project_root).as_posix()
-    output.append(f"This pages lists all {len(all_codes)} ShellCheck rules. (It was generated from the `{relative_path}` file.)\n")
+    analytics_rel = analytics_path.relative_to(project_root).as_posix()
+    parser_rel = parser_path.relative_to(project_root).as_posix()
+    shellsupport_rel = shellsupport_path.relative_to(project_root).as_posix()
+    output.append(f"This pages lists all {len(all_codes)} ShellCheck rules. (It was generated from the `{analytics_rel}`, `{parser_rel}`, and `{shellsupport_rel}` files.)\n")
     output.append("Rules with a long name are optional checks that can be enabled with `-o` or `enable` directives.\n")
     output.append("| SC Code | Long Name | Description/Message |")
     output.append("|---------|-----------|---------------------|")
