@@ -26,3 +26,6 @@ stack.yaml.lock
 
 ### misc ###
 /shellcheck.1
+
+### Agents ###
+.claude
